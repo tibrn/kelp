@@ -4,6 +4,20 @@ type EventBinance struct {
 	Name string `json:"e"`
 }
 
+type Status string
+
+var (
+	NEW      Status = "NEW"      //The order has been accepted into the engine.
+	CANCELED Status = "CANCELED" //The order has been canceled by the user
+	REJECTED Status = "REJECTED" //The order has been rejected and was not processed. (This is never pushed into the User Data Stream)
+	TRADE    Status = "TRADE"    //Part of the order or all of the order's quantity has filled.
+	EXPIRED  Status = "EXPIRED"  //The order was canceled according to the order type's rules (e.g. LIMIT FOK orders with no fill, LIMIT IOC or MARKET orders that partially fill) or by the exchange, (e.g. orders canceled during liquidation, orders canceled during maintenance)
+)
+
+func (s Status) IsOpen() bool {
+	return s == NEW || s == TRADE
+}
+
 type EventExecutionReport struct {
 	EventBinance
 	EventTime                    int64       `json:"E"` // "E": 1499405658658,           //Event time
@@ -19,7 +33,7 @@ type EventExecutionReport struct {
 	OrderListID                  int64       `json:"g"` // "g": -1,                       // OrderListId
 	OriginalClientID             interface{} `json:"C"` // "C": null,                     // Original client order ID; This is the ID of the order being canceled
 	CurrentExecutionType         string      `json:"x"` // "x": "NEW",                    // Current execution type
-	CurrentOrderStatus           string      `json:"X"` // "X": "NEW",                    // Current order status
+	CurrentOrderStatus           Status      `json:"X"` // "X": "NEW",                    // Current order status
 	OrderRejectReason            string      `json:"r"` // "r": "NONE",                   // Order reject reason; will be an error code.
 	OrderID                      int64       `json:"i"` // "i": 4293153,                  // Order ID
 	LastExecutedQuantity         string      `json:"l"` // "l": "0.00000000",             // Last executed quantity

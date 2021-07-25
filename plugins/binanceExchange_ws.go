@@ -42,7 +42,9 @@ var (
 	ErrConversionCursor              = errConversion{from: "interface", to: "int64"}
 )
 
-type History []*sdk.EventExecutionReport
+//History it's a map with all transactions, for index it's used the order id
+//we use map instead of slice to avoid making calculation to find which index needs to be updated
+type History map[int64]*sdk.EventExecutionReport
 
 type Subscriber func(symbol string, state *mapEvents) (*stream, error)
 type errMissingSymbol struct {
@@ -217,7 +219,7 @@ func subcribeUserStream(listenKey string, state *mapEvents) (*stream, error) {
 		history, isHistory := state.Get(event.Symbol)
 
 		if !isHistory {
-			history.data = make(History, 0)
+			history.data = make(History)
 			state.Set(event.Symbol, history)
 		}
 
@@ -231,7 +233,7 @@ func subcribeUserStream(listenKey string, state *mapEvents) (*stream, error) {
 			return
 		}
 
-		history.data = append(data, event)
+		data[event.OrderID] = event
 
 		lastCursor := event.TransactionTime
 
@@ -752,9 +754,9 @@ func (beWs *binanceExchangeWs) readTrade(pair *model.TradingPair, symbol string,
 		// OrderID read by calling function depending on override set for exchange params in "orderId" field of Info object
 	}
 
-	if rawTrade.Side == "sell" {
+	if strings.ToLower(rawTrade.Side) == "sell" {
 		trade.OrderAction = model.OrderActionSell
-	} else if rawTrade.Side == "buy" {
+	} else if strings.ToLower(rawTrade.Side) == "buy" {
 		trade.OrderAction = model.OrderActionBuy
 	} else {
 		return nil, fmt.Errorf("unrecognized value for 'side' field: %s (rawTrade = %+v)", rawTrade.Side, rawTrade)
@@ -768,6 +770,64 @@ func (beWs *binanceExchangeWs) readTrade(pair *model.TradingPair, symbol string,
 	}
 
 	return &trade, nil
+}
+
+// GetOpenOrders impl.
+func (beWs *binanceExchangeWs) GetOpenOrders(pairs []*model.TradingPair) (map[model.TradingPair][]model.OpenOrder, error) {
+
+	// convert to a map so we can easily search for the existence of a trading pair
+	// kraken uses different symbols when fetching open orders!
+	pairsMap, e := model.TradingPairs2Strings2(beWs.assetConverter, "", pairs)
+	if e != nil {
+		return nil, e
+	}
+
+	m := map[model.TradingPair][]model.OpenOrder{}
+
+	for pair, symbol := range pairsMap {
+
+		if _, ok := m[pair]; !ok {
+			m[pair] = []model.OpenOrder{}
+		}
+
+		var history History
+
+		if data, isOk := beWs.events.TradeHistoryEvents.Get(symbol); !isOk {
+			//No orders for this symbol
+			continue
+		} else {
+			hist, isOk := data.data.(History)
+
+			if !isOk {
+				return nil, fmt.Errorf("error fetching history:%s", ErrConversionHistory)
+			}
+
+			history = hist
+		}
+
+		for _, order := range history {
+
+			if !order.CurrentOrderStatus.IsOpen() {
+				continue
+			}
+
+			m[pair] = append(m[pair], model.OpenOrder{
+				Order: model.Order{
+					Pair:        &pair,
+					OrderAction: model.OrderActionFromString(strings.ToLower(order.Side)),
+					OrderType:   model.OrderTypeFromString(strings.ToLower(order.OrderType)),
+					Price:       model.MustNumberFromString(order.OrderPrice, getPrecision(order.OrderPrice)),
+					Volume:      model.MustNumberFromString(order.OrderQuantity, getPrecision(order.OrderQuantity)),
+					Timestamp:   model.MakeTimestamp(order.OrderCreationTime),
+				},
+				ID:             strconv.FormatInt(order.OrderID, 10),
+				StartTime:      model.MakeTimestamp(int64(order.OrderCreationTime)),
+				VolumeExecuted: model.MustNumberFromString(order.LastExecutedQuantity, getPrecision(order.LastExecutedQuantity)),
+			})
+		}
+
+	}
+	return m, nil
 }
 
 //Unsubscribe ... unsubscribe from binance streams

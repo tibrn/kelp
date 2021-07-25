@@ -178,3 +178,31 @@ func Test_binanceExchangeWs_GetTradeHistory(t *testing.T) {
 
 	assert.Fail(t, "force fail")
 }
+
+func Test_binanceExchangeWs_GetOpenOrders(t *testing.T) {
+
+	testBinanceExchangeWs, err := makeBinanceWs(emptyAPIKeyBinance)
+
+	if !assert.NoError(t, err) {
+		return
+	}
+
+	pair := &model.TradingPair{Base: model.XLM, Quote: model.USD}
+	m, e := testBinanceExchangeWs.GetOpenOrders([]*model.TradingPair{pair})
+	if !assert.NoError(t, e) {
+		return
+	}
+
+	// print open orders here for convenience
+	for pair, openOrders := range m {
+		fmt.Printf("Open Orders for pair: %s\n", pair.String())
+		for _, o := range openOrders {
+			fmt.Printf("    %s\n", o.String())
+		}
+	}
+
+	if !assert.True(t, len(m) > 0, "there were no open orders") {
+		return
+	}
+
+}
